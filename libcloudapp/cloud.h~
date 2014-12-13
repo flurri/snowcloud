@@ -1,0 +1,46 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <curl/curl.h>
+
+// JSON Parsing
+
+#define TYPE_UNKNOWN -1
+#define TYPE_INT 0
+#define TYPE_STRING 1
+#define TYPE_DOUBLE 2
+#define TYPE_JSON 3
+#define TYPE_BLOB 4
+
+typedef struct _json_key {
+  char *key;
+  size_t key_len;
+  unsigned int type;
+  char *str_val;
+  size_t slen;
+  int int_val;
+  double double_val;
+  struct _json_key *json_val;
+  char *blob_val;
+  size_t blob_len;
+  struct _json_key *next_key;
+} jsonKey;
+
+int parse_json(char *input, size_t inputlen, jsonKey *json);
+
+// CloudApp Interfacing
+
+typedef struct _cloud_auth {
+  char *user;
+  size_t ulen;
+  char *pass;
+  size_t plen;
+} cloudAuth;
+
+#define HTTP_POST 0
+#define HTTP_GET 1
+#define HTTP_PUT 2
+
+int cloud_api(char *resource, cloudAuth auth, int type, jsonKey *body, jsonKey *returnJson);
+
+int cloud_upload(cloudAuth auth, char *filename, size_t fname_len, char *filedata, size_t fsize);
+
