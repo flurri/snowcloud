@@ -3,12 +3,6 @@ CFLAGS=-c -Wall
 LIBS=-lX11 -lcairo
 PREFIX=
 
-install:
-	cp snowcloud $(PREFIX)/bin/snowcloud
-
-clean:
-	rm *.o snowcloud
-
 all: snowcloud
 
 snowcloud: snowcloud.o gfx.o
@@ -19,3 +13,10 @@ snowcloud.o:
 
 gfx.o:
 	$(CC) $(CFLAGS) gfx.c
+
+install:
+	cp snowcloud $(PREFIX)/bin/snowcloud
+
+clean:
+	rm *.o snowcloud
+

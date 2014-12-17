@@ -23,7 +23,6 @@
  * 
  */
 #include "snowcloud.h"
-#include <math.h>
 
 cairo_status_t _write_png(void *closure, const unsigned char *data, unsigned int length);
 
@@ -41,7 +40,7 @@ void RemoveDecorations(Display *disp, Window win) {
 }
 
 int get_xevents(Display *disp, XEvent *e) {
-  if (!e) return; // nothing we can do
+  if (!e) return 0; // nothing we can do
 
   XNextEvent(disp, e);
 
@@ -212,7 +211,6 @@ void test_write_file(pngstream png, char *fname) {
 }
 
 cairo_status_t _write_png(void *closure, const unsigned char *data, unsigned int length) {
-  unsigned int i;
   pngstream *png = (pngstream *)closure;
 
   if (!png->data) {
