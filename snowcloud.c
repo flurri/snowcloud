@@ -1,14 +1,32 @@
 /*
  * snowcloud - A CloudApp interface for X11
- * Developed by Sarah 2014
- * 
+ *
+ * Copyright (c) 2014 Sarah[flurry]
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  * 
  */
-#include "nimbus.h"
+#include "snowcloud.h"
 
 int main(int argc, char *argv[]) {
   Display *disp;
-  int scr, prepare;
+  int scr, prepare, tmp;
   Window selector, rootwin;
   XEvent event;
   cairo_surface_t *canvas;
@@ -17,6 +35,8 @@ int main(int argc, char *argv[]) {
   XSetWindowAttributes winattr;
   XVisualInfo vis;
   ScreenshotLoc initloc, endloc;
+  pngstream pngstr;
+  XImage *ximg;
   
   // Get the user's display
   if (!(disp = XOpenDisplay(NULL))) {
@@ -86,14 +106,43 @@ int main(int argc, char *argv[]) {
 	printf("[INFO] Operation cancelled.\n");
 	break;
       }
-    } else if (event.type == ButtonRelease) {
+    } else if (event.type == ButtonRelease) { // We have completed selecting!
       if (event.xbutton.button == Button1) {
 	endloc.x = event.xbutton.x;
 	endloc.y = event.xbutton.y;
+
+	// Negative resolutions are bad and make no sense anyway
+	if (endloc.x < initloc.x) {
+	  tmp = endloc.x;
+	  endloc.x = initloc.x;
+	  initloc.x = tmp;
+	}
+	if (endloc.y < initloc.y) {
+	  tmp = endloc.y;
+	  endloc.y = initloc.y;
+	  initloc.y = tmp;
+	}
+
+	// Debug printf()s
 	printf("Initial co-ordinates: (%d, %d)\n", initloc.x, initloc.y);
 	printf("Final co-ordinates:   (%d, %d)\n", endloc.x, endloc.y);
 	printf("Dimensions:           %dx%d\n", endloc.y-initloc.y, endloc.x-initloc.x);
-      } else {
+
+	// Get selection as XImage
+	ximg = XGetImage(disp, rootwin, initloc.x, initloc.y, (endloc.x-initloc.x), (endloc.y-initloc.y), XAllPlanes(), ZPixmap);
+
+	// Pass XImage to mkpngstream
+	pngstr = mkpngstream(disp, DefaultScreen(disp), vis.visual, ximg, initloc, endloc); // Make PNG stream to send to CloudApp
+	if (!pngstr.data) {
+	  printf("Making PNG stream failed...\n");
+	  if (ximg) {
+	    XFree(ximg); // XFree doesn't like NULL pointers
+	  }
+	} else {
+	  test_write_file(pngstr, "test.png");
+	}
+	break;
+      } else { // ... Wrong button!
 	printf("[INFO Operation cancelled.\n");
 	break;
       }
