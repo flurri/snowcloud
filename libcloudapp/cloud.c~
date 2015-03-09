@@ -1,9 +1,0 @@
-#include "cloud.h"
-
-int cloudapp_request_upload(cloudAuth auth, uploadReq *up) {
-  char url[] = "/items/new";
-  char *data;
-  size_t datalen;
-  jsontok_t *tokens;
-
-  
