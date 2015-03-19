@@ -38,7 +38,7 @@ char *cloudRequest(char *url, cloudAuth auth, int isPost, struct curl_httppost *
   if (!auth.username) return NULL;
   if (!auth.password) return NULL;
 
-  data = (char *)calloc(1, sizeof(char) * MB(1));
+  data = (char *)calloc(sizeof(char), MB(1)+1);
 
   if (!data) {
     return NULL;
@@ -60,8 +60,9 @@ char *cloudRequest(char *url, cloudAuth auth, int isPost, struct curl_httppost *
     // time to POST!
     curl_easy_setopt(curl, CURLOPT_URL, url);
     if (isPost && params) {
+      curl_easy_setopt(curl, CURLOPT_POST, 1L);
       curl_easy_setopt(curl, CURLOPT_HTTPPOST, params);
-      curl_easy_setopt(curl, CURLOPT_POST, 1);
+      headers = curl_slist_append(headers, "Content-Type: multipart/form-data");
     } // if (isPost && params)
     
     // establish headers
@@ -74,14 +75,21 @@ char *cloudRequest(char *url, cloudAuth auth, int isPost, struct curl_httppost *
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result);
     
     // we need to follow 301/302 redirects
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
     
     // authentication fun
     curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST);
     curl_easy_setopt(curl, CURLOPT_USERNAME, auth.username);
     curl_easy_setopt(curl, CURLOPT_PASSWORD, auth.password);
-    
+
+#ifdef _DEBUG_MODE
+    curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+#endif
+
     // send it out!
+#ifdef _DEBUG_MODE
+    printf("Prepare for cURL debug...\n+==========+\n");
+#endif
     stat = curl_easy_perform(curl);
 
     // bad response?

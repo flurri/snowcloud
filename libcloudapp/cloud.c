@@ -19,11 +19,9 @@ char *jsonGetString(json_t *json, char *key) {
     return NULL;
   } else {
     jsonstr = json_string_value(tmp);
-    hold = (char *)malloc(sizeof(char) * strlen(jsonstr));
-    strcpy(hold, jsonstr);
-    ret = (char *)malloc(strlen(hold) + 1);
+    ret = (char *)calloc(strlen(jsonstr)+1, sizeof(char));
     if (ret) {
-      strcpy(ret, hold);
+      strcpy(ret, jsonstr);
     }
     json_decref(tmp);
     return ret;
@@ -31,14 +29,14 @@ char *jsonGetString(json_t *json, char *key) {
 }
 
 char *deconst(const char *cs) {
-    char *s;
+  char *s; // our non-const
     
-    if (!cs) return NULL;
+  if (!cs) return NULL;
     
-    s = (char *)malloc(strlen(cs));
-    strcpy(s, cs);
+  s = (char *)calloc(strlen(cs)+1, sizeof(char));
+  strcpy(s, cs);
     
-    return s;
+  return s;
 }
 
 char *replaceString(char *input, char *orig, char *rep) {
@@ -51,7 +49,7 @@ char *replaceString(char *input, char *orig, char *rep) {
 
   if (!(ptr = strstr(input, orig))) return input;
 
-  buf = (char *)malloc(sizeof(char) * (strlen(rep) + strlen(input)));
+  buf = (char *)calloc(strlen(rep) + strlen(input) + 1, sizeof(char));
 
   strncpy(buf, input, ptr-input);
 
@@ -75,7 +73,7 @@ int cloudapp_request_upload(uploadReq *up) {
   if (!up->config.auth.username) return -1;
   if (!up->config.auth.password) return -1;
 
-  fullurl = (char *)malloc(sizeof(char) * 256);
+  fullurl = (char *)calloc(sizeof(char), 513);
   if (!fullurl) return -1;
 
   snprintf(fullurl, 512, "%s%s", base, url);
@@ -85,6 +83,7 @@ int cloudapp_request_upload(uploadReq *up) {
 #endif
 
   getData = cloudRequest(fullurl, up->config.auth, 0, NULL);
+  free(fullurl);
 
   if (!getData) {
     return -1;
@@ -107,10 +106,6 @@ int cloudapp_request_upload(uploadReq *up) {
       json_decref(root);
     return -1;
   }
-
-#ifdef _DEBUG_MODE
-  printf("[libcloudapp:cloud.c][DEBUG] uploads_remaining\n");
-#endif
 
   // get data
 
@@ -138,10 +133,6 @@ int cloudapp_request_upload(uploadReq *up) {
 
   json_decref(tmp);
 
-#ifdef _DEBUG_MODE
-  printf("[libcloudapp:cloud.c][DEBUG] max_upload_size\n");
-#endif
-
   // max_upload_size
   tmp = json_object_get(root, "max_upload_size");
   if (!tmp) {
@@ -160,11 +151,6 @@ int cloudapp_request_upload(uploadReq *up) {
 
   json_decref(tmp);
 
-#ifdef _DEBUG_MODE
-  printf("[libcloudapp:cloud.c][DEBUG] url\n");
-#endif
-
-
   up->url = jsonGetString(root, "url");
   if (!up->url) {
     json_decref(root);
@@ -179,15 +165,15 @@ int cloudapp_request_upload(uploadReq *up) {
 
   up->params.AWSAccessKeyId = jsonGetString(params, "AWSAccessKeyId");
   if (!up->params.AWSAccessKeyId) {
-    json_decref(root);
     json_decref(params);
+    json_decref(root);
     return -1;
   }
 
   up->params.key = jsonGetString(params, "key");
   if (!up->params.key) {
-    json_decref(root);
     json_decref(params);
+    json_decref(root);
     return -1;
   }
 
@@ -195,35 +181,37 @@ int cloudapp_request_upload(uploadReq *up) {
 
   up->params.acl = jsonGetString(params, "acl");
   if (!up->params.acl) {
-    json_decref(root);
     json_decref(params);
+    json_decref(root);
     return -1;
   }
 
   up->params.success_action_redirect = jsonGetString(params, "success_action_redirect");
   if (!up->params.success_action_redirect) {
-    json_decref(root);
     json_decref(params);
+    json_decref(root);
     return -1;
   }
 
   up->params.signature = jsonGetString(params, "signature");
   if (!up->params.signature) {
-    json_decref(root);
     json_decref(params);
+    json_decref(root);
     return -1;
   }
 
   up->params.policy = jsonGetString(params, "policy");
   if (!up->params.policy) {
-    json_decref(root);
     json_decref(params);
+    json_decref(root);
     return -1;
   }
 
   json_decref(params);
-  if (root->refcount > 0)
+
+  if (root->refcount > 0) {
     json_decref(root);
+  }
 
   up->ready = 1;
 
@@ -286,6 +274,11 @@ int cloudapp_upload_file_to_s3(uploadReq *up, char *url) {
   }
 
   root = json_loads(postData, 0, &err);
+
+#ifdef _DEBUG_MODE
+  printf("[libcloudapp:cloud.c][DEBUG] postData:\n%s\n", postData);
+#endif
+
   free(postData);
 
   if (!root) {
