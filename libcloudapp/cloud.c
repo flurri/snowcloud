@@ -1,71 +1,310 @@
 #include "cloud.h"
 
-int cloudapp_request_upload(cloudAuth auth, uploadReq *up) {
+static size_t find_offset(const char *data) {
+  const char *newline = strchr(data, '\n');
+  return (!newline) ? 0 : ((size_t)(newline - data));
+}
+
+char *jsonGetString(json_t *json, char *key) {
+  json_t *tmp;
+  char *hold, *ret;
+  const char *jsonstr;
+
+  if (!key) return NULL;
+  if (!json) return NULL;
+
+  tmp = json_object_get(json, key);
+  if (!json_is_string(tmp)) {
+    json_decref(tmp);
+    return NULL;
+  } else {
+    jsonstr = json_string_value(tmp);
+    hold = (char *)malloc(sizeof(char) * strlen(jsonstr));
+    strcpy(hold, jsonstr);
+    ret = (char *)malloc(strlen(hold) + 1);
+    if (ret) {
+      strcpy(ret, hold);
+    }
+    json_decref(tmp);
+    return ret;
+  }
+}
+
+char *deconst(const char *cs) {
+    char *s;
+    
+    if (!cs) return NULL;
+    
+    s = (char *)malloc(strlen(cs));
+    strcpy(s, cs);
+    
+    return s;
+}
+
+char *replaceString(char *input, char *orig, char *rep) {
+  char *buf;
+  char *ptr;
+
+  if (!input) return input;
+  if (!orig) return input;
+  if (!rep) return input;
+
+  if (!(ptr = strstr(input, orig))) return input;
+
+  buf = (char *)malloc(sizeof(char) * (strlen(rep) + strlen(input)));
+
+  strncpy(buf, input, ptr-input);
+
+  buf[ptr-input] = 0;
+  snprintf(buf+(ptr-input), (strlen(rep) + strlen(input)), "%s%s", rep, (char *)(ptr+strlen(orig)));
+
+  return buf;
+}
+
+int cloudapp_request_upload(uploadReq *up) {
   char url[] = "/items/new";
-  char *data, *input;
-  size_t datalen, tokenlen, i, j;
-  jsmntok_t *tokens, *tmp;
-  pstate state = START;
-  int httplevel = -1;
+  char *getData, *fullurl, *base;
+  json_t *root, *tmp, *params;
+  json_error_t err;
 
-  input = cloudapp_get(url, auth, &httplevel);
+  // check for unallocated stuff
 
-  if (!input) {
-    return httplevel;
+  if (!up) return -1;
+  if (!up->config.baseURL) return -1;
+  else base = up->config.baseURL;
+  if (!up->config.auth.username) return -1;
+  if (!up->config.auth.password) return -1;
+
+  fullurl = (char *)malloc(sizeof(char) * 256);
+  if (!fullurl) return -1;
+
+  snprintf(fullurl, 512, "%s%s", base, url);
+
+#ifdef _DEBUG_MODE
+  printf("[libcloudapp:cloud.c][DEBUG] fullurl = %s\n", fullurl);
+#endif
+
+  getData = cloudRequest(fullurl, up->config.auth, 0, NULL);
+
+  if (!getData) {
+    return -1;
   }
 
-  tokens = json_tokenize(input);
+#ifdef _DEBUG_MODE
+  printf("[libcloudapp:cloud.c][DEBUG] getData:\n%s\n", getData);
+#endif
 
-  for (i=0,j=1;j>0;i++,j--) {
-    tmp = &tokens[i];
+  root = json_loads((getData+find_offset(getData)), 0, &err);
+  free(getData);
 
-    if ((tmp->start == -1) || (tmp->end == -1)) {
-      fprintf(stderr, "[ERROR] Uninitialized token!\n");
-      free(input);
-      return -2;
+  if (!root) {
+    fprintf(stderr, "[libcloudapp:cloud.c][ERROR] line %d: %s\n", err.line, err.text);
+    return -1;
+  }
+
+  if (!json_is_object(root)) {
+    fprintf(stderr, "[libcloudapp:cloud.c][ERROR] root must be an object\n");
+      json_decref(root);
+    return -1;
+  }
+
+#ifdef _DEBUG_MODE
+  printf("[libcloudapp:cloud.c][DEBUG] uploads_remaining\n");
+#endif
+
+  // get data
+
+  // uploads_remaining
+  tmp = json_object_get(root, "uploads_remaining");
+  if (!tmp) {
+    up->uploads_remaining = -1;
+    up->isFree = 0;
+  } else {
+    if (json_is_integer(tmp)) {
+      up->uploads_remaining = (int)json_integer_value(tmp);
+      up->isFree = 1;
+    } else {
+      json_decref(tmp);
+      json_decref(root);
+      return 403; // Assume no uploads
     }
+  }
 
-    if (tmp->type == JSMN_ARRAY || tmp->type == JSMN_OBJECT) {
-      j+= tmp->size;
+  if (up->uploads_remaining == 0) {
+    json_decref(tmp);
+    json_decref(root);
+    return 403;
+  }
+
+  json_decref(tmp);
+
+#ifdef _DEBUG_MODE
+  printf("[libcloudapp:cloud.c][DEBUG] max_upload_size\n");
+#endif
+
+  // max_upload_size
+  tmp = json_object_get(root, "max_upload_size");
+  if (!tmp) {
+    json_decref(tmp);
+    json_decref(root);
+    return -1; // Assume malformed
+  } else {
+    if (json_is_integer(tmp)) {
+      up->max_upload_size = json_integer_value(tmp);
+    } else {
+      json_decref(tmp);
+      json_decref(root);
+      return -1; // Assume malformed
     }
+  }
 
-    switch (state) {
-    case START:
-      if (tmp->type != JSMN_OBJECT) {
-	fprintf(stderr, "[ERROR] Root must be an object! Aborting...\n");
-	return -3;
-      }
+  json_decref(tmp);
 
-      state = KEY;
-      tokenlen = tmp->size;
+#ifdef _DEBUG_MODE
+  printf("[libcloudapp:cloud.c][DEBUG] url\n");
+#endif
 
-      if (!tokenlen) {
-	state = STOP;
-      }
 
-      if (tokenlen % 2) {
-	fprintf(stderr, "[ERROR] Object must have an even number of children! Aborting...\n");
-	return -3;
-      }
-      break;
-    case KEY:
-      tokenlen--;
-      if (tmp->type != JSMN_STRING) {
-	fprintf(stderr, "[ERROR] Keys must be strings! Aborting...\n");
-	return -4;
-      }
+  up->url = jsonGetString(root, "url");
+  if (!up->url) {
+    json_decref(root);
+    return -1;
+  }
 
-      state = SKIP;
+  params = json_object_get(root, "params");
+  if (!params) {
+    json_decref(root);
+    return -1; // Assume malformed
+  }
 
-      for (i=0;i<sizeof(KEYS)/sizeof(char *);i++) {
-	if (json_token_streq(input, tmp, KEYS[i])) {
-	  printf("%s: ", KEYS[i]);
-	  state = PRINT;
-	  break;
-	}
-      }
+  up->params.AWSAccessKeyId = jsonGetString(params, "AWSAccessKeyId");
+  if (!up->params.AWSAccessKeyId) {
+    json_decref(root);
+    json_decref(params);
+    return -1;
+  }
 
-      break;
+  up->params.key = jsonGetString(params, "key");
+  if (!up->params.key) {
+    json_decref(root);
+    json_decref(params);
+    return -1;
+  }
 
-    case SKIP:
-      if (tmp->type
+  up->params.key = replaceString(up->params.key, "${filename}", up->filename);
+
+  up->params.acl = jsonGetString(params, "acl");
+  if (!up->params.acl) {
+    json_decref(root);
+    json_decref(params);
+    return -1;
+  }
+
+  up->params.success_action_redirect = jsonGetString(params, "success_action_redirect");
+  if (!up->params.success_action_redirect) {
+    json_decref(root);
+    json_decref(params);
+    return -1;
+  }
+
+  up->params.signature = jsonGetString(params, "signature");
+  if (!up->params.signature) {
+    json_decref(root);
+    json_decref(params);
+    return -1;
+  }
+
+  up->params.policy = jsonGetString(params, "policy");
+  if (!up->params.policy) {
+    json_decref(root);
+    json_decref(params);
+    return -1;
+  }
+
+  json_decref(params);
+  if (root->refcount > 0)
+    json_decref(root);
+
+  up->ready = 1;
+
+  return 0;
+}
+
+int cloudapp_upload_file_to_s3(uploadReq *up, char *url) {
+  char *postData;
+  json_t *root, *tmp;
+  json_error_t err;
+  struct curl_httppost *post = NULL, *last = NULL;
+
+  if (!up) return -1;
+  if (!up->config.auth.username) return -1;
+  if (!up->config.auth.password) return -1;
+  if (!up->filesize) return -1;
+  if (!up->file) return -1;
+
+  if (up->ready == 0) return -1;
+
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "AWSAccessKeyId",
+               CURLFORM_PTRCONTENTS, up->params.AWSAccessKeyId,
+               CURLFORM_CONTENTSLENGTH, strlen(up->params.AWSAccessKeyId),
+               CURLFORM_END);
+    
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "key",
+               CURLFORM_PTRCONTENTS, up->params.key,
+               CURLFORM_CONTENTSLENGTH, strlen(up->params.key),
+               CURLFORM_END);
+    
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "acl",
+               CURLFORM_PTRCONTENTS, up->params.acl,
+               CURLFORM_CONTENTSLENGTH, strlen(up->params.acl),
+               CURLFORM_END);
+    
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "success_action_redirect",
+               CURLFORM_PTRCONTENTS, up->params.success_action_redirect,
+               CURLFORM_CONTENTSLENGTH, strlen(up->params.success_action_redirect),
+               CURLFORM_END);
+    
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "signature",
+               CURLFORM_PTRCONTENTS, up->params.signature,
+               CURLFORM_CONTENTSLENGTH, strlen(up->params.signature),
+               CURLFORM_END);
+    
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "policy",
+               CURLFORM_PTRCONTENTS, up->params.policy,
+               CURLFORM_CONTENTSLENGTH, strlen(up->params.policy),
+               CURLFORM_END);
+  
+  curl_formadd(&post, &last, CURLFORM_COPYNAME, "file",
+               CURLFORM_PTRCONTENTS, up->file,
+               CURLFORM_CONTENTSLENGTH, up->filesize,
+               CURLFORM_END);
+    
+  postData = cloudRequest(up->url, up->config.auth, 1, post);
+
+  if (!postData) {
+    return -2;
+  }
+
+  root = json_loads(postData, 0, &err);
+  free(postData);
+
+  if (!root) {
+    fprintf(stderr, "[libcloudapp:cloud.c][ERROR] line %d: %s\n", err.line, err.text);
+    return -1;
+  }
+
+  if (!json_is_object(root)) {
+    json_decref(root);
+    fprintf(stderr, "[libcloudapp:cloud.c][ERROR] root must be an object\n");
+    return -1;
+  }
+
+  url = jsonGetString(root, "href");
+
+  if (!tmp) {
+    json_decref(root);
+    return -1;
+  }
+
+  return 0;
+}
